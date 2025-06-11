@@ -1,0 +1,21 @@
+#!/bin/bash
+# Configurazione interfacce
+ip addr add 10.0.1.1/24 dev eth0
+ip addr add 10.0.2.1/24 dev eth1
+ip link set eth0 up
+ip link set eth1 up
+
+# Abilitazione IP forwarding
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Installazione strumenti
+apt-get update > /dev/null 2>&1
+apt-get install -y tcpdump bridge-utils > /dev/null 2>&1
+
+echo "r1 configuration completed"
+echo "=============================="
+echo "Per catturare traffico VXLAN:"
+echo "tcpdump -i eth0 -n port 4789 -v"
+echo "tcpdump -i eth1 -n port 4789 -v"
+echo "=============================="
+ip addr show
