@@ -2,7 +2,7 @@
 
 ---
 
-## Struttura del progetto
+## Project Structure
 
 ```
 NGN-Project/
