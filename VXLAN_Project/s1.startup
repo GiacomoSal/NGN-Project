@@ -1,52 +1,101 @@
+# ===== s1.startup (Switch s1 - Multi-Tenant VXLAN) =====
 #!/bin/bash
-# Interfaccia fisica verso h1
-ip link set dev eth0 up
+# Switch s1 - Configurazione Multi-Tenant VXLAN
 
-# Interfaccia fisica verso r1
-ip link set dev eth1 up
-ip addr add 10.0.1.2/24 dev eth1
+# Interfacce fisiche verso host
+ip link set dev eth0 up  # verso h1a (Tenant A)
+ip link set dev eth1 up  # verso h1b (Tenant B)
+ip link set dev eth2 up  # verso h1c (Tenant C)
 
-# Rotta sotto-strato verso s2 via r1
-ip route add 10.0.2.0/24 via 10.0.1.1 dev eth1
+# Interfaccia verso router
+ip link set dev eth3 up
+ip addr add 10.0.1.2/24 dev eth3
 
+# Rotta verso s2 via router
+ip route add 10.0.2.0/24 via 10.0.1.1 dev eth3
 
 # Installazione strumenti
 apt-get update > /dev/null 2>&1
 apt-get install -y bridge-utils tcpdump > /dev/null 2>&1
 
-# Creazione bridge PRIMA della VXLAN
-ip link add br0 type bridge
-ip link set br0 up
+# ===== TENANT A (VNI 100) =====
+# Bridge per Tenant A
+ip link add br100 type bridge
+ip link set br100 up
+ip addr add 192.168.10.254/24 dev br100
 
-# Assegnazione IP al bridge per fungere da gateway
-ip addr add 192.168.100.254/24 dev br0
-
-# Creazione interfaccia VXLAN
+# VXLAN per Tenant A
 ip link add vxlan100 type vxlan \
     id 100 \
     remote 10.0.2.2 \
-    dev eth1 \
+    dev eth3 \
     dstport 4789 \
     learning
 
 ip link set vxlan100 up
 
-# Collegamento interfacce al bridge
-ip link set eth0 master br0
-ip link set vxlan100 master br0
+# Collegamento al bridge Tenant A
+ip link set eth0 master br100      # h1a
+ip link set vxlan100 master br100
+
+# ===== TENANT B (VNI 200) =====
+# Bridge per Tenant B
+ip link add br200 type bridge
+ip link set br200 up
+ip addr add 192.168.20.254/24 dev br200
+
+# VXLAN per Tenant B
+ip link add vxlan200 type vxlan \
+    id 200 \
+    remote 10.0.2.2 \
+    dev eth3 \
+    dstport 4789 \
+    learning
+
+ip link set vxlan200 up
+
+# Collegamento al bridge Tenant B
+ip link set eth1 master br200      # h1b
+ip link set vxlan200 master br200
+
+# ===== TENANT C (VNI 300) =====
+# Bridge per Tenant C
+ip link add br300 type bridge
+ip link set br300 up
+ip addr add 192.168.30.254/24 dev br300
+
+# VXLAN per Tenant C
+ip link add vxlan300 type vxlan \
+    id 300 \
+    remote 10.0.2.2 \
+    dev eth3 \
+    dstport 4789 \
+    learning
+
+ip link set vxlan300 up
+
+# Collegamento al bridge Tenant C
+ip link set eth2 master br300      # h1c
+ip link set vxlan300 master br300
 
 # Abilitazione forwarding
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
-# Configurazione statica della FDB per VXLAN
-sleep 2
+# Configurazione FDB entries
+sleep 3
 bridge fdb append 00:00:00:00:00:00 dev vxlan100 dst 10.0.2.2
+bridge fdb append 00:00:00:00:00:00 dev vxlan200 dst 10.0.2.2
+bridge fdb append 00:00:00:00:00:00 dev vxlan300 dst 10.0.2.2
 
-echo "s1 configuration completed"
-echo "=============================="
-echo "Bridge status:"
-brctl show
-echo "VXLAN status:"
-ip link show vxlan100
-echo "FDB entries:"
-bridge fdb show dev vxlan100
+echo "s1 Multi-Tenant configuration completed"
+echo "========================================"
+echo "TENANT A (VNI 100):"
+brctl show br100
+echo "TENANT B (VNI 200):"
+brctl show br200
+echo "TENANT C (VNI 300):"
+brctl show br300
+echo "========================================"
+echo "VXLAN Interfaces:"
+ip link show | grep vxlan
+echo "========================================"

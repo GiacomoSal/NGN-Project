@@ -1,0 +1,7 @@
+# ===== h1a.startup (Tenant A - Lato s1) =====
+#!/bin/bash
+ip addr add 192.168.10.1/24 dev eth0
+ip link set eth0 up
+ip route add default via 192.168.10.254
+echo "h1a (Tenant A) configuration completed"
+ip addr show eth0
