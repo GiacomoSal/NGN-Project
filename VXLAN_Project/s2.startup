@@ -1,24 +1,30 @@
-# ===== s2.startup (Switch s2 - Multi-Tenant VXLAN) =====
 #!/bin/bash
-# Switch s2 - Configurazione Multi-Tenant VXLAN
+# s2.startup - Switch s2 con ISOLAMENTO usando iptables
 
-# Interfacce fisiche verso host
+echo "=== s2 Multi-Tenant VXLAN con Isolamento iptables ==="
+
+# Configurazione interfacce fisiche
 ip link set dev eth0 up  # verso h2a (Tenant A)
 ip link set dev eth1 up  # verso h2b (Tenant B)
 ip link set dev eth2 up  # verso h2c (Tenant C)
+ip link set dev eth3 up  # verso router
 
-# Interfaccia verso router
-ip link set dev eth3 up
+# Configurazione interfaccia di trasporto
 ip addr add 10.0.2.2/24 dev eth3
-
-# Rotta verso s1 via router
 ip route add 10.0.1.0/24 via 10.0.2.1 dev eth3
 
 # Installazione strumenti
 apt-get update > /dev/null 2>&1
-apt-get install -y bridge-utils tcpdump > /dev/null 2>&1
+apt-get install -y bridge-utils tcpdump iptables > /dev/null 2>&1
 
-# ===== TENANT A (VNI 100) =====
+# Abilitazione IP forwarding
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# =================================================================
+# TENANT A (VNI 100)
+# =================================================================
+echo "Configurazione Tenant A (VNI 100)..."
+
 # Bridge per Tenant A
 ip link add br100 type bridge
 ip link set br100 up
@@ -38,7 +44,11 @@ ip link set vxlan100 up
 ip link set eth0 master br100      # h2a
 ip link set vxlan100 master br100
 
-# ===== TENANT B (VNI 200) =====
+# =================================================================
+# TENANT B (VNI 200)
+# =================================================================
+echo "Configurazione Tenant B (VNI 200)..."
+
 # Bridge per Tenant B
 ip link add br200 type bridge
 ip link set br200 up
@@ -58,7 +68,11 @@ ip link set vxlan200 up
 ip link set eth1 master br200      # h2b
 ip link set vxlan200 master br200
 
-# ===== TENANT C (VNI 300) =====
+# =================================================================
+# TENANT C (VNI 300)
+# =================================================================
+echo "Configurazione Tenant C (VNI 300)..."
+
 # Bridge per Tenant C
 ip link add br300 type bridge
 ip link set br300 up
@@ -78,24 +92,50 @@ ip link set vxlan300 up
 ip link set eth2 master br300      # h2c
 ip link set vxlan300 master br300
 
-# Abilitazione forwarding
-echo 1 > /proc/sys/net/ipv4/ip_forward
+# =================================================================
+# CONFIGURAZIONE ISOLAMENTO CON IPTABLES
+# =================================================================
+echo "Configurazione isolamento inter-tenant..."
 
-# Configurazione FDB entries
+# Blocca traffico tra Tenant A e Tenant B
+iptables -A FORWARD -s 192.168.10.0/24 -d 192.168.20.0/24 -j DROP
+iptables -A FORWARD -s 192.168.20.0/24 -d 192.168.10.0/24 -j DROP
+
+# Blocca traffico tra Tenant A e Tenant C
+iptables -A FORWARD -s 192.168.10.0/24 -d 192.168.30.0/24 -j DROP
+iptables -A FORWARD -s 192.168.30.0/24 -d 192.168.10.0/24 -j DROP
+
+# Blocca traffico tra Tenant B e Tenant C
+iptables -A FORWARD -s 192.168.20.0/24 -d 192.168.30.0/24 -j DROP
+iptables -A FORWARD -s 192.168.30.0/24 -d 192.168.20.0/24 -j DROP
+
+# Permetti tutto il resto (traffico intra-tenant e verso gateway)
+iptables -A FORWARD -j ACCEPT
+
+# =================================================================
+# CONFIGURAZIONE FDB ENTRIES
+# =================================================================
 sleep 3
+
 bridge fdb append 00:00:00:00:00:00 dev vxlan100 dst 10.0.1.2
 bridge fdb append 00:00:00:00:00:00 dev vxlan200 dst 10.0.1.2
 bridge fdb append 00:00:00:00:00:00 dev vxlan300 dst 10.0.1.2
 
-echo "s2 Multi-Tenant configuration completed"
-echo "========================================"
+echo ""
+echo "=== s2 Multi-Tenant Configuration Complete ==="
+echo "=============================================="
 echo "TENANT A (VNI 100):"
 brctl show br100
+echo ""
 echo "TENANT B (VNI 200):"
 brctl show br200
+echo ""
 echo "TENANT C (VNI 300):"
 brctl show br300
-echo "========================================"
+echo ""
+echo "IPTABLES Rules:"
+iptables -L FORWARD -n
+echo ""
 echo "VXLAN Interfaces:"
 ip link show | grep vxlan
-echo "========================================"
+echo "=============================================="
