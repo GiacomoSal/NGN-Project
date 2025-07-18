@@ -1,11 +1,12 @@
 #!/bin/bash
-# Router r1 - Configurazione per VXLAN Multi-Tenant
-# Funzione: Routing del traffico di trasporto tra s1 e s2
-# NON vede il traffico tenant (è incapsulato in VXLAN)
+# Router r1 - Configurazione aggiornata per VLAN + VXLAN Multi-Tenant
+# Funzione: Routing del traffico di trasporto VXLAN tra s3 e s2
+
+echo "=== r1 Multi-Tenant Router (VLAN + VXLAN) Configuration ==="
 
 # Configurazione interfacce
-ip addr add 10.0.1.1/24 dev eth0  # verso s1
-ip addr add 10.0.2.1/24 dev eth1  # verso s2
+ip addr add 10.0.1.1/24 dev eth0  # verso s3 (VXLAN traffic)
+ip addr add 10.0.2.1/24 dev eth1  # verso s2 (VXLAN traffic)
 ip link set eth0 up
 ip link set eth1 up
 
@@ -19,28 +20,53 @@ apt-get install -y tcpdump bridge-utils iptables-persistent > /dev/null 2>&1
 echo "r1 Multi-Tenant Router configuration completed"
 echo "=============================================="
 echo "Transport Network Configuration:"
-echo "- eth0 (to s1): 10.0.1.1/24"
+echo "- eth0 (to s3): 10.0.1.1/24"
 echo "- eth1 (to s2): 10.0.2.1/24"
 echo "- IP Forwarding: ENABLED"
 echo ""
-echo "VXLAN Multi-Tenant Info:"
-echo "- Tenant A: VNI 100 (192.168.10.0/24)"
-echo "- Tenant B: VNI 200 (192.168.20.0/24)" 
-echo "- Tenant C: VNI 300 (192.168.30.0/24)"
+echo "VLAN + VXLAN Multi-Tenant Architecture:"
+echo "- h1x → s1 (untagged) → s1 (VLAN tag) → s3 (VLAN→VXLAN) → r1 → s2 (VXLAN) → h2x"
 echo ""
-echo "Monitoring Commands:"
-echo "- All VXLAN traffic: tcpdump -i any -n port 4789 -v"
-echo "- From s1: tcpdump -i eth0 -n port 4789 -v"
-echo "- From s2: tcpdump -i eth1 -n port 4789 -v"
-echo "- Count by VNI: tcpdump -i any -n port 4789 | grep 'vni'"
+echo "Traffic Flow:"
+echo "1. h1a → s1: untagged Ethernet"
+echo "2. s1 → s3: 802.1Q VLAN tagged (VLAN 10/20/30)"
+echo "3. s3 → r1: VXLAN encapsulated (VNI 100/200/300)"
+echo "4. r1 → s2: VXLAN forwarded"
+echo "5. s2 → h2a: VXLAN decapsulated to Ethernet"
+echo ""
+echo "Tenant Mapping:"
+echo "- Tenant A: VLAN 10 ↔ VNI 100 (192.168.10.0/24)"
+echo "- Tenant B: VLAN 20 ↔ VNI 200 (192.168.20.0/24)"
+echo "- Tenant C: VLAN 30 ↔ VNI 300 (192.168.30.0/24)"
+echo ""
+echo "=============================================="
+echo "MONITORING Commands:"
+echo "VXLAN Traffic Analysis:"
+echo "- All VXLAN: tcpdump -i any -n port 4789 -v"
+echo "- From s3: tcpdump -i eth0 -n port 4789 -v"
+echo "- To s2: tcpdump -i eth1 -n port 4789 -v"
+echo "- By VNI: tcpdump -i any -n port 4789 -v | grep 'vni'"
+echo ""
+echo "VLAN Traffic (on s1-s3 link):"
+echo "- Monitor s1 eth3: tcpdump -i any vlan -e"
+echo "- Monitor s3 eth0: tcpdump -i any vlan -e"
+echo ""
+echo "Per-Tenant Analysis:"
+echo "- Tenant A: tcpdump -i any 'port 4789 and vni 100' -v"
+echo "- Tenant B: tcpdump -i any 'port 4789 and vni 200' -v"
+echo "- Tenant C: tcpdump -i any 'port 4789 and vni 300' -v"
 echo ""
 echo "Stats Commands:"
 echo "- Interface stats: cat /proc/net/dev"
 echo "- Routing table: ip route show"
+echo "- ARP table: arp -a"
 echo "=============================================="
 
 # Mostra configurazione
+echo "Network Interfaces:"
 ip addr show
 echo ""
 echo "Routing table:"
 ip route show
+echo ""
+echo "Ready to route VXLAN traffic between s3 and s2!"

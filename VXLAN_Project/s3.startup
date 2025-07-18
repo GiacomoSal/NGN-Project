@@ -1,0 +1,162 @@
+#!/bin/bash
+# s3.startup - VLAN to VXLAN Gateway
+# Funzione: Riceve traffico VLAN tagged da s1 e lo converte in VXLAN verso s2
+
+echo "=== s3 VLAN to VXLAN Gateway Configuration ==="
+
+# Configurazione interfacce fisiche
+ip link set dev eth0 up  # verso s1 (VLAN trunk)
+ip link set dev eth1 up  # verso r1 (VXLAN transport)
+
+# Configurazione IP per trasporto VXLAN
+ip addr add 10.0.1.3/24 dev eth1
+
+# Installazione strumenti
+apt-get update > /dev/null 2>&1
+apt-get install -y bridge-utils vlan tcpdump > /dev/null 2>&1
+
+# Caricamento modulo 802.1Q
+modprobe 8021q
+
+# Abilitazione IP forwarding
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Routing verso s2 (via r1)
+ip route add 10.0.2.0/24 via 10.0.1.1 dev eth1
+
+# ================================================================
+# CREAZIONE VLAN SUB-INTERFACES (da s1)
+
+# Creazione VLAN sub-interfaces su eth0 (da s1)
+ip link add link eth0 name eth0.10 type vlan id 10    # Tenant A
+ip link add link eth0 name eth0.20 type vlan id 20    # Tenant B
+ip link add link eth0 name eth0.30 type vlan id 30    # Tenant C
+
+# Attivazione VLAN sub-interfaces
+ip link set eth0.10 up
+ip link set eth0.20 up
+ip link set eth0.30 up
+
+# ================================================================
+# TENANT A: VLAN 10 → VXLAN VNI 100
+echo "Configurazione Tenant A (VLAN 10 → VXLAN VNI 100)..."
+
+# Creazione bridge per Tenant A
+ip link add br-100 type bridge
+ip link set br-100 up
+
+# Creazione VXLAN per Tenant A
+ip link add vxlan100 type vxlan \
+    id 100 \
+    remote 10.0.2.2 \
+    dev eth1 \
+    dstport 4789 \
+    learning
+
+ip link set vxlan100 up
+
+# Collegamento VLAN interface e VXLAN al bridge
+ip link set eth0.10 master br-100
+ip link set vxlan100 master br-100
+
+# ================================================================
+# TENANT B: VLAN 20 → VXLAN VNI 200
+echo "Configurazione Tenant B (VLAN 20 → VXLAN VNI 200)..."
+
+# Creazione bridge per Tenant B
+ip link add br-200 type bridge
+ip link set br-200 up
+
+# Creazione VXLAN per Tenant B
+ip link add vxlan200 type vxlan \
+    id 200 \
+    remote 10.0.2.2 \
+    dev eth1 \
+    dstport 4789 \
+    learning
+
+ip link set vxlan200 up
+
+# Collegamento VLAN interface e VXLAN al bridge
+ip link set eth0.20 master br-200
+ip link set vxlan200 master br-200
+
+# ================================================================
+# TENANT C: VLAN 30 → VXLAN VNI 300
+echo "Configurazione Tenant C (VLAN 30 → VXLAN VNI 300)..."
+
+# Creazione bridge per Tenant C
+ip link add br-300 type bridge
+ip link set br-300 up
+
+# Creazione VXLAN per Tenant C
+ip link add vxlan300 type vxlan \
+    id 300 \
+    remote 10.0.2.2 \
+    dev eth1 \
+    dstport 4789 \
+    learning
+
+ip link set vxlan300 up
+
+# Collegamento VLAN interface e VXLAN al bridge
+ip link set eth0.30 master br-300
+ip link set vxlan300 master br-300
+
+# ================================================================
+# CONFIGURAZIONE FDB ENTRIES
+sleep 3
+
+bridge fdb append 00:00:00:00:00:00 dev vxlan100 dst 10.0.2.2
+bridge fdb append 00:00:00:00:00:00 dev vxlan200 dst 10.0.2.2
+bridge fdb append 00:00:00:00:00:00 dev vxlan300 dst 10.0.2.2
+
+echo ""
+echo "=== s3 VLAN to VXLAN Gateway Configuration Complete ==="
+echo "======================================================"
+echo "VLAN to VXLAN Mapping:"
+echo "- VLAN 10 (Tenant A) → VXLAN VNI 100"
+echo "- VLAN 20 (Tenant B) → VXLAN VNI 200"
+echo "- VLAN 30 (Tenant C) → VXLAN VNI 300"
+echo ""
+echo "Bridge Status:"
+echo "Tenant A (VLAN 10 → VNI 100):"
+brctl show br-100
+echo ""
+echo "Tenant B (VLAN 20 → VNI 200):"
+brctl show br-200
+echo ""
+echo "Tenant C (VLAN 30 → VNI 300):"
+brctl show br-300
+echo ""
+echo "VLAN Interfaces:"
+cat /proc/net/vlan/config
+echo ""
+echo "VXLAN Interfaces:"
+ip link show | grep vxlan
+echo ""
+echo "Network Configuration:"
+ip addr show dev eth1
+echo ""
+echo "Routes:"
+ip route show
+echo ""
+echo "======================================================"
+echo "MONITORING Commands:"
+echo "VLAN Traffic (from s1):"
+echo "- All VLAN: tcpdump -i eth0 -e vlan"
+echo "- Tenant A: tcpdump -i eth0.10 -e"
+echo "- Tenant B: tcpdump -i eth0.20 -e"
+echo "- Tenant C: tcpdump -i eth0.30 -e"
+echo ""
+echo "VXLAN Traffic (to s2):"
+echo "- All VXLAN: tcpdump -i eth1 port 4789 -v"
+echo "- VNI 100: tcpdump -i eth1 port 4789 | grep 'vni 100'"
+echo "- VNI 200: tcpdump -i eth1 port 4789 | grep 'vni 200'"
+echo "- VNI 300: tcpdump -i eth1 port 4789 | grep 'vni 300'"
+echo ""
+echo "Bridge Learning:"
+echo "- bridge fdb show dev vxlan100"
+echo "- bridge fdb show dev vxlan200"
+echo "- bridge fdb show dev vxlan300"
+echo "======================================================"

@@ -1,240 +1,144 @@
 #!/bin/bash
-# s2.startup - Switch s2 con ISOLAMENTO COMPLETO usando Network Namespaces
-# VXLAN nel root namespace + routing verso tenant namespaces
+# s2.startup - Switch VXLAN
+# Riceve traffico VXLAN da s3 e lo converte in traffico locale
 
-echo "=== s2 Multi-Tenant VXLAN con Routing tra Namespaces ==="
+echo "=== s2 VXLAN Switch Configuration ==="
 
-# Configurazione interfacce fisiche di base
+# Configurazione interfacce fisiche
 ip link set dev eth0 up  # verso h2a (Tenant A)
 ip link set dev eth1 up  # verso h2b (Tenant B)
 ip link set dev eth2 up  # verso h2c (Tenant C)
-ip link set dev eth3 up  # verso router
+ip link set dev eth3 up  # verso r1 (VXLAN transport)
 
-# Configurazione interfaccia di trasporto
+# Configurazione IP per trasporto VXLAN
 ip addr add 10.0.2.2/24 dev eth3
-ip route add 10.0.1.0/24 via 10.0.2.1 dev eth3
 
 # Installazione strumenti
 apt-get update > /dev/null 2>&1
-apt-get install -y bridge-utils tcpdump iptables > /dev/null 2>&1
+apt-get install -y bridge-utils tcpdump > /dev/null 2>&1
 
 # Abilitazione IP forwarding
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
-# =================================================================
-# TENANT A (VNI 100) - Root Bridge + Namespace Routing
-# =================================================================
-echo "Configurazione Tenant A (VNI 100)..."
+# Routing verso s3 (via r1)
+ip route add 10.0.1.0/24 via 10.0.2.1 dev eth3
 
-# Creazione bridge per Tenant A nel ROOT namespace
-ip link add br100 type bridge
-ip link set br100 up
+# ================================================================
+# TENANT A: VXLAN VNI 100 → Local Bridge
+echo "Configurazione Tenant A (VXLAN VNI 100)..."
 
-# Creazione VXLAN per Tenant A nel ROOT namespace (accesso a eth3)
+# Creazione bridge per Tenant A
+ip link add br-100 type bridge
+ip link set br-100 up
+
+# Creazione VXLAN per Tenant A
 ip link add vxlan100 type vxlan \
     id 100 \
-    remote 10.0.1.2 \
+    remote 10.0.1.3 \
     dev eth3 \
     dstport 4789 \
     learning
 
 ip link set vxlan100 up
 
-# Collegamento VXLAN al bridge root
-ip link set vxlan100 master br100
+# Collegamento host e VXLAN al bridge
+ip link set eth0 master br-100        # host h2a
+ip link set vxlan100 master br-100    # VXLAN da s3
 
-# Creazione namespace per Tenant A
-ip netns add tenant-a
+# ================================================================
+# TENANT B: VXLAN VNI 200 → Local Bridge
+echo "Configurazione Tenant B (VXLAN VNI 200)..."
 
-# Creazione veth pair per collegare root e namespace
-ip link add veth-a-root type veth peer name veth-a-ns
+# Creazione bridge per Tenant B
+ip link add br-200 type bridge
+ip link set br-200 up
 
-# Spostamento interfacce
-ip link set eth0 netns tenant-a                    # host interface nel namespace
-ip link set veth-a-ns netns tenant-a              # veth namespace end nel namespace
-ip link set veth-a-root master br100              # veth root end nel bridge
-
-# Configurazione nel ROOT namespace
-ip link set veth-a-root up
-
-# Configurazione nel namespace Tenant A
-ip netns exec tenant-a ip link set lo up
-ip netns exec tenant-a ip link set eth0 up
-ip netns exec tenant-a ip link set veth-a-ns up
-
-# Creazione bridge interno nel namespace
-ip netns exec tenant-a ip link add br-tenant-a type bridge
-ip netns exec tenant-a ip link set br-tenant-a up
-
-# Collegamento interfacce al bridge interno
-ip netns exec tenant-a ip link set eth0 master br-tenant-a
-ip netns exec tenant-a ip link set veth-a-ns master br-tenant-a
-
-# Configurazione IP del bridge interno (gateway per gli host)
-ip netns exec tenant-a ip addr add 192.168.10.254/24 dev br-tenant-a
-
-# Abilitazione forwarding nel namespace
-ip netns exec tenant-a sysctl -w net.ipv4.ip_forward=1
-
-# =================================================================
-# TENANT B (VNI 200) - Root Bridge + Namespace Routing
-# =================================================================
-echo "Configurazione Tenant B (VNI 200)..."
-
-# Creazione bridge per Tenant B nel ROOT namespace
-ip link add br200 type bridge
-ip link set br200 up
-
-# Creazione VXLAN per Tenant B nel ROOT namespace
+# Creazione VXLAN per Tenant B
 ip link add vxlan200 type vxlan \
     id 200 \
-    remote 10.0.1.2 \
+    remote 10.0.1.3 \
     dev eth3 \
     dstport 4789 \
     learning
 
 ip link set vxlan200 up
 
-# Collegamento VXLAN al bridge root
-ip link set vxlan200 master br200
+# Collegamento host e VXLAN al bridge
+ip link set eth1 master br-200        # host h2b
+ip link set vxlan200 master br-200    # VXLAN da s3
 
-# Creazione namespace per Tenant B
-ip netns add tenant-b
+# ================================================================
+# TENANT C: VXLAN VNI 300 → Local Bridge
+echo "Configurazione Tenant C (VXLAN VNI 300)..."
 
-# Creazione veth pair per collegare root e namespace
-ip link add veth-b-root type veth peer name veth-b-ns
+# Creazione bridge per Tenant C
+ip link add br-300 type bridge
+ip link set br-300 up
 
-# Spostamento interfacce
-ip link set eth1 netns tenant-b
-ip link set veth-b-ns netns tenant-b
-ip link set veth-b-root master br200
-
-# Configurazione nel ROOT namespace
-ip link set veth-b-root up
-
-# Configurazione nel namespace Tenant B
-ip netns exec tenant-b ip link set lo up
-ip netns exec tenant-b ip link set eth1 up
-ip netns exec tenant-b ip link set veth-b-ns up
-
-# Creazione bridge interno nel namespace
-ip netns exec tenant-b ip link add br-tenant-b type bridge
-ip netns exec tenant-b ip link set br-tenant-b up
-
-# Collegamento interfacce al bridge interno
-ip netns exec tenant-b ip link set eth1 master br-tenant-b
-ip netns exec tenant-b ip link set veth-b-ns master br-tenant-b
-
-# Configurazione IP del bridge interno
-ip netns exec tenant-b ip addr add 192.168.20.254/24 dev br-tenant-b
-
-# Abilitazione forwarding nel namespace
-ip netns exec tenant-b sysctl -w net.ipv4.ip_forward=1
-
-# =================================================================
-# TENANT C (VNI 300) - Root Bridge + Namespace Routing
-# =================================================================
-echo "Configurazione Tenant C (VNI 300)..."
-
-# Creazione bridge per Tenant C nel ROOT namespace
-ip link add br300 type bridge
-ip link set br300 up
-
-# Creazione VXLAN per Tenant C nel ROOT namespace
+# Creazione VXLAN per Tenant C
 ip link add vxlan300 type vxlan \
     id 300 \
-    remote 10.0.1.2 \
+    remote 10.0.1.3 \
     dev eth3 \
     dstport 4789 \
     learning
 
 ip link set vxlan300 up
 
-# Collegamento VXLAN al bridge root
-ip link set vxlan300 master br300
+# Collegamento host e VXLAN al bridge
+ip link set eth2 master br-300        # host h2c
+ip link set vxlan300 master br-300    # VXLAN da s3
 
-# Creazione namespace per Tenant C
-ip netns add tenant-c
-
-# Creazione veth pair per collegare root e namespace
-ip link add veth-c-root type veth peer name veth-c-ns
-
-# Spostamento interfacce
-ip link set eth2 netns tenant-c
-ip link set veth-c-ns netns tenant-c
-ip link set veth-c-root master br300
-
-# Configurazione nel ROOT namespace
-ip link set veth-c-root up
-
-# Configurazione nel namespace Tenant C
-ip netns exec tenant-c ip link set lo up
-ip netns exec tenant-c ip link set eth2 up
-ip netns exec tenant-c ip link set veth-c-ns up
-
-# Creazione bridge interno nel namespace
-ip netns exec tenant-c ip link add br-tenant-c type bridge
-ip netns exec tenant-c ip link set br-tenant-c up
-
-# Collegamento interfacce al bridge interno
-ip netns exec tenant-c ip link set eth2 master br-tenant-c
-ip netns exec tenant-c ip link set veth-c-ns master br-tenant-c
-
-# Configurazione IP del bridge interno
-ip netns exec tenant-c ip addr add 192.168.30.254/24 dev br-tenant-c
-
-# Abilitazione forwarding nel namespace
-ip netns exec tenant-c sysctl -w net.ipv4.ip_forward=1
-
-# =================================================================
+# ================================================================
 # CONFIGURAZIONE FDB ENTRIES
-# =================================================================
 sleep 3
 
-# FDB entries per VXLAN nel root namespace
-bridge fdb append 00:00:00:00:00:00 dev vxlan100 dst 10.0.1.2
-bridge fdb append 00:00:00:00:00:00 dev vxlan200 dst 10.0.1.2  
-bridge fdb append 00:00:00:00:00:00 dev vxlan300 dst 10.0.1.2
+# FDB entries per VXLAN
+bridge fdb append 00:00:00:00:00:00 dev vxlan100 dst 10.0.1.3
+bridge fdb append 00:00:00:00:00:00 dev vxlan200 dst 10.0.1.3
+bridge fdb append 00:00:00:00:00:00 dev vxlan300 dst 10.0.1.3
 
 echo ""
-echo "=== s2 Multi-Tenant Routing Configuration Complete ==="
-echo "======================================================"
-echo "ROOT NAMESPACE - VXLAN Bridges:"
-echo "TENANT A (VNI 100):"
-brctl show br100
+echo "=== s2 VXLAN Switch Configuration Complete ==="
+echo "=============================================="
+echo "VXLAN Configuration:"
+echo "- VXLAN VNI 100 (Tenant A): eth0 (h2a) ↔ vxlan100 (from s3)"
+echo "- VXLAN VNI 200 (Tenant B): eth1 (h2b) ↔ vxlan200 (from s3)"
+echo "- VXLAN VNI 300 (Tenant C): eth2 (h2c) ↔ vxlan300 (from s3)"
 echo ""
-echo "TENANT B (VNI 200):"
-brctl show br200
+echo "Bridge Status:"
+echo "Tenant A (VNI 100):"
+brctl show br-100
 echo ""
-echo "TENANT C (VNI 300):"
-brctl show br300
+echo "Tenant B (VNI 200):"
+brctl show br-200
 echo ""
-echo "TENANT NAMESPACES - Internal Bridges:"
-echo "Tenant A:"
-ip netns exec tenant-a brctl show br-tenant-a
+echo "Tenant C (VNI 300):"
+brctl show br-300
 echo ""
-echo "Tenant B:"
-ip netns exec tenant-b brctl show br-tenant-b
-echo ""
-echo "Tenant C:"
-ip netns exec tenant-c brctl show br-tenant-c
-echo ""
-echo "Network Namespaces:"
-ip netns list
-echo ""
-echo "VXLAN Interfaces (Root Namespace):"
+echo "VXLAN Interfaces:"
 ip link show | grep vxlan
 echo ""
-echo "Veth Pairs:"
-ip link show | grep veth
-echo "======================================================"
+echo "Network Configuration:"
+ip addr show dev eth3
 echo ""
-echo "DEBUG Commands:"
-echo "Root namespace bridges: brctl show"
-echo "Tenant A namespace: ip netns exec tenant-a ip addr show"
-echo "Tenant B namespace: ip netns exec tenant-b ip addr show"
-echo "Tenant C namespace: ip netns exec tenant-c ip addr show"
+echo "Routes:"
+ip route show
 echo ""
-echo "Test connectivity:"
-echo "ip netns exec tenant-a ping 192.168.10.2  # ping h2a"
-echo "From h2a: ping 192.168.10.1  # ping h1a"
+echo "=============================================="
+echo "MONITORING Commands:"
+echo "- All VXLAN traffic: tcpdump -i eth3 port 4789 -v"
+echo "- VNI 100: tcpdump -i eth3 port 4789 | grep 'vni 100'"
+echo "- VNI 200: tcpdump -i eth3 port 4789 | grep 'vni 200'"
+echo "- VNI 300: tcpdump -i eth3 port 4789 | grep 'vni 300'"
+echo ""
+echo "Local Traffic:"
+echo "- Tenant A: tcpdump -i eth0"
+echo "- Tenant B: tcpdump -i eth1"
+echo "- Tenant C: tcpdump -i eth2"
+echo ""
+echo "Bridge Learning:"
+echo "- bridge fdb show dev vxlan100"
+echo "- bridge fdb show dev vxlan200"
+echo "- bridge fdb show dev vxlan300"
+echo "=============================================="
