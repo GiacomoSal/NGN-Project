@@ -166,7 +166,7 @@ NGN-Project/
 ---
 
 ## Links
-- [Presentation]()
+- [Presentation](https://www.canva.com/design/DAGtbDNKwfc/qG4-lfayj3eO-yd_VpKCNA/view?utm_content=DAGtbDNKwfc&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h88998bebe9)
 
 ---
 
