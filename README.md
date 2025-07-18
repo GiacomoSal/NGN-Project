@@ -15,7 +15,7 @@ These instructions will help you set up the project on your local machine for de
 Before getting started, ensure that you have the following installed:
 
 - **Docker** - [Download Docker](https://www.docker.com/get-started)
-- **Kathara** - [Install Kathara](https://github.com/KatharaFramework/Kathara)
+- **Kathara** - [Download Kathara](https://www.kathara.org/)
 - **Git** - [Download Git](https://git-scm.com/)
 
 ---
