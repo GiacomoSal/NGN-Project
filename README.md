@@ -178,4 +178,4 @@ NGN-Project/
 
 ---
 
-_Project realised for the Next Generation Networks 2024/2025 course - University of Trento_
+_Project developed for the Next Generation Networks 2024/2025 course - University of Trento_
